@@ -1,6 +1,8 @@
 import os
 import re
 from pydub import AudioSegment
+from collections import defaultdict
+from difflib import SequenceMatcher
 
 # Dictionary for transliteration of special characters to ASCII equivalents
 SPECIAL_CHAR_MAP = {
@@ -38,7 +40,24 @@ def extract_kapitel_or_teil_number(filename):
     kapitel_match = re.search(r"(Kapitel|Teil)\s*(\d+)", filename)
     return int(kapitel_match.group(2)) if kapitel_match else 0
 
+def extract_title(filename):
+    """
+    Extract the title from the filename (before any number or extension).
+    """
+    # Assuming the title is everything before a number or file extension
+    match = re.match(r"([a-zA-Z0-9\s]+)(\d+|\.mp3|\.mp4|\.pdf)?$", filename)
+    return match.group(1) if match else filename
+
+def similar(a, b):
+    """
+    Function to calculate similarity ratio between two strings.
+    """
+    return SequenceMatcher(None, a, b).ratio()
+
 def merge_mp3_files(mp3_files, output_file):
+    """
+    Merges multiple MP3 files into a single MP3 file.
+    """
     # Load the first file
     combined = AudioSegment.from_mp3(mp3_files[0])
 
@@ -53,13 +72,7 @@ def merge_mp3_files(mp3_files, output_file):
 
 def clean_file_name(filename):
     """
-    Cleans the filename to match the desired format:
-    - Extracts "Folge" number regardless of its position.
-    - Removes content within parentheses or brackets.
-    - Removes "Kapitel", "Teil", and related prefixes.
-    - Replaces spaces with underscores.
-    - Replaces unsafe special characters.
-    - Removes any double underscores.
+    Cleans the filename to match the desired format.
     """
     # Extract "Folge <number>" regardless of position
     folge_match = re.search(r"Folge\s*(\d+)", filename)
@@ -91,30 +104,39 @@ def clean_file_name(filename):
     
     return cleaned
 
-def get_files_by_folge(directory):
-    # Dictionary to store files by their Folge number
-    files_by_folge = {}
-
-    # Regex to find files with "Folge" followed by a number
-    pattern = re.compile(r"Folge (\d+)")
-
+def group_files_by_similarity(directory, similarity_threshold=0.8):
+    """
+    Groups files by their title similarity.
+    """
+    groups = defaultdict(list)
+    
     # Traverse through the folder and classify files
     for filename in os.listdir(directory):
         if filename.endswith(".mp3"):
-            match = pattern.search(filename)
-            if match:
-                folge_number = match.group(1)
-                if folge_number not in files_by_folge:
-                    files_by_folge[folge_number] = []
-                files_by_folge[folge_number].append(os.path.join(directory, filename))
+            title = extract_title(filename)
+            added = False
+            
+            # Check against existing groups
+            for group_title in list(groups.keys()):
+                if similar(title, group_title) > similarity_threshold:
+                    groups[group_title].append(os.path.join(directory, filename))
+                    added = True
+                    break
+            
+            # If not added to any group, create a new group
+            if not added:
+                groups[title].append(os.path.join(directory, filename))
     
-    return files_by_folge
+    return groups
 
 def merge_files_in_directory(directory):
-    files_by_folge = get_files_by_folge(directory)
+    """
+    Merge files in the directory by similarity in title.
+    """
+    file_groups = group_files_by_similarity(directory)
     
-    # For each group of files with the same Folge number, merge them
-    for folge_number, files in files_by_folge.items():
+    # For each group of files with similar titles, merge them
+    for group_title, files in file_groups.items():
 
         # Extract Kapitel or Teil numbers and sort files accordingly
         files_with_kapitel_or_teil = [(extract_kapitel_or_teil_number(os.path.basename(f)), f) for f in files]
@@ -132,12 +154,12 @@ def merge_files_in_directory(directory):
         
         # Check for start with 1
         if kapitel_or_teil_numbers[0] != 1:
-            print(f"Warning: Folge {folge_number} has no start.")
+            print(f"Warning: Group '{group_title}' has no start.")
             continue
 
         # Check for too few files
         if len(kapitel_or_teil_numbers) <= 1:
-            print(f"Warning: Folge {folge_number} has only one Kapitel/Teil.")
+            print(f"Warning: Group '{group_title}' has only one Kapitel/Teil.")
             continue
 
         # Check for gaps in Kapitel/Teil numbers
@@ -146,7 +168,7 @@ def merge_files_in_directory(directory):
             if kapitel_or_teil_numbers[i] != kapitel_or_teil_numbers[i-1] + 1:
                 gap_detected = True
         if gap_detected:
-            print(f"Warning: Gap detected in Kapitel/Teil order for Folge {folge_number}.")
+            print(f"Warning: Gap detected in Kapitel/Teil order for group '{group_title}'.")
             continue
         
         # Get the name of the first file (base name without directory)
