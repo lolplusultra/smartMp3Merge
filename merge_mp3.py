@@ -24,6 +24,9 @@ SPECIAL_CHAR_MAP = {
     # Add more mappings as needed
 }
 
+# Global counter for Folge numbers
+folge_counter = 1
+
 def replace_special_characters(text):
     """
     Replace special characters in the text using the SPECIAL_CHAR_MAP.
@@ -73,13 +76,21 @@ def merge_mp3_files(mp3_files, output_file):
 def clean_file_name(filename):
     """
     Cleans the filename to match the desired format.
+    If the Folge number starts with '000', it will increment.
     """
+    global folge_counter
+
     # Extract "Folge <number>" regardless of position
     folge_match = re.search(r"Folge\s*(\d+)", filename)
     folge_number = folge_match.group(1) if folge_match else "000"
 
-    # Ensure the Folge number is always 3 digits
-    folge_number = folge_number.zfill(3)
+    # If the Folge number is "000", increment the counter for each new file processed
+    if folge_number == "000":
+        folge_number = str(folge_counter).zfill(3)
+        folge_counter += 1
+    else:
+        # Ensure the Folge number is always 3 digits
+        folge_number = folge_number.zfill(3)
 
     # Remove "Folge <number>" and any content inside parentheses/brackets
     filename = re.sub(r"Folge\s*\d+|\s*\(.*?\)|\s*\[.*?\]", "", filename)
@@ -94,6 +105,7 @@ def clean_file_name(filename):
     filename = replace_special_characters(filename)
     
     # Remove any double underscores
+    filename = re.sub(r"-+", "_", filename)
     filename = re.sub(r"_+", "_", filename)
     
     # Strip leading/trailing underscores
@@ -104,7 +116,7 @@ def clean_file_name(filename):
     
     return cleaned
 
-def group_files_by_similarity(directory, similarity_threshold=0.8):
+def group_files_by_similarity(directory, similarity_threshold=0.9):
     """
     Groups files by their title similarity.
     """
